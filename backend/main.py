@@ -45,7 +45,8 @@ def score(address: str, matched_address: str) -> float:
 
 def lookup_and_score(address: str) -> tuple[str, float]:
     matched_address = mapbox_client.geocode_best_match(address)
-    similarity_score = score(address, matched_address)
+    print("Matched Address:", matched_address)
+    similarity_score = score(address, matched_address) if matched_address else 0.0
     return matched_address, similarity_score
 
 
@@ -68,14 +69,54 @@ def create_address(session: DBSession, payload: AddressCreate) -> Address:
     session.commit()
     return address.to_pydantic()
 
-@app.post("/addresses/bulk", status_code=200)
-def bulk_upload_addresses(session: DBSession, file: UploadFile = File(...)):
-    # TODO: implement bulk CSV upload
-    # - Parse the uploaded CSV file
-    # - Extract addresses
-    # - For each address: geocode via Mapbox, compute similarity, store
-    # - Return results
-    raise NotImplementedError("Bulk upload not yet implemented")
+@app.post("/addresses/bulk", status_code=200, response_model=List[Address])
+async def bulk_upload_addresses(session: DBSession, file: UploadFile = File(...)):
+    import csv
+    import io
+
+    # Parse CSV
+    content = await file.read()
+    text = content.decode("utf-8")
+    reader = csv.DictReader(io.StringIO(text))
+    
+    addresses_to_process = []
+    for row in reader:
+        # Assuming the CSV has a column named "address" based on the sample file
+        # If not, we might need to be more flexible, but let's stick to the sample for now.
+        # The sample shows "address" as the header.
+        if "address" in row and row["address"]:
+            addresses_to_process.append(row["address"])
+    
+    if not addresses_to_process:
+        return []
+
+    # Batch geocode
+    # Mapbox batch limit is 1000. If we have more, we should chunk it.
+    # For this assessment, we assume the input is within reasonable limits or we chunk it simply.
+    
+    results = []
+    chunk_size = 1000
+    
+    for i in range(0, len(addresses_to_process), chunk_size):
+        chunk = addresses_to_process[i:i + chunk_size]
+        matches = mapbox_client.geocode_batch(chunk)
+        
+        for address_text, match in zip(chunk, matches):
+            similarity_score = score(address_text, match) if match else 0.0
+            
+            db_address = AddressORM(
+                address=address_text, 
+                matched_address=match if match else "", 
+                match_score=similarity_score
+            )
+            session.add(db_address)
+            # We flush to get the ID, but commit later or now?
+            # Committing now to be safe and simple
+            session.commit()
+            session.refresh(db_address)
+            results.append(db_address.to_pydantic())
+            
+    return results
 
 
 @app.post("/addresses/refresh", status_code=200)
