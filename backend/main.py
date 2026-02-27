@@ -45,7 +45,6 @@ def score(address: str, matched_address: str) -> float:
 
 def lookup_and_score(address: str) -> tuple[str, float]:
     matched_address = mapbox_client.geocode_best_match(address)
-    print("Matched Address:", matched_address)
     similarity_score = score(address, matched_address) if matched_address else 0.0
     return matched_address, similarity_score
 
@@ -74,26 +73,18 @@ async def bulk_upload_addresses(session: DBSession, file: UploadFile = File(...)
     import csv
     import io
 
-    # Parse CSV
     content = await file.read()
     text = content.decode("utf-8")
     reader = csv.DictReader(io.StringIO(text))
     
     addresses_to_process = []
     for row in reader:
-        # Assuming the CSV has a column named "address" based on the sample file
-        # If not, we might need to be more flexible, but let's stick to the sample for now.
-        # The sample shows "address" as the header.
         if "address" in row and row["address"]:
             addresses_to_process.append(row["address"])
     
     if not addresses_to_process:
         return []
 
-    # Batch geocode
-    # Mapbox batch limit is 1000. If we have more, we should chunk it.
-    # For this assessment, we assume the input is within reasonable limits or we chunk it simply.
-    
     results = []
     chunk_size = 1000
     
@@ -110,8 +101,7 @@ async def bulk_upload_addresses(session: DBSession, file: UploadFile = File(...)
                 match_score=similarity_score
             )
             session.add(db_address)
-            # We flush to get the ID, but commit later or now?
-            # Committing now to be safe and simple
+
             session.commit()
             session.refresh(db_address)
             results.append(db_address.to_pydantic())
